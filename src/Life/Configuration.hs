@@ -8,8 +8,9 @@
 -- | Contains configuration data type.
 
 module Life.Configuration
-       ( LifePath (..)
-
+       ( Branch(..)
+       , BranchState(..)
+       , LifePath (..)
        , LifeConfiguration  (..)
        , singleDirConfig
        , singleFileConfig
@@ -20,6 +21,7 @@ module Life.Configuration
 --       , ParseLifeException (..)
 
          -- * Lenses for 'LifeConfiguration'
+       , branch
        , files
        , directories
 
@@ -46,6 +48,12 @@ import qualified Data.Text as T
 import qualified Text.Show as Show
 import qualified Toml
 
+-- Git branch representation.
+newtype Branch = Branch { unBranch :: Text } deriving (Show, Eq, Semigroup, Monoid)
+
+-- | Data type to represent where particular branch exists.
+data BranchState = OnlyRemote | OnlyLocal | ExistsBoth | NotExists
+
 -- | Data type to represent either file or directory.
 data LifePath = File FilePath | Dir FilePath
     deriving (Show)
@@ -57,6 +65,7 @@ data LifePath = File FilePath | Dir FilePath
 data LifeConfiguration = LifeConfiguration
      { lifeConfigurationFiles       :: Set (Path Rel File)
      , lifeConfigurationDirectories :: Set (Path Rel Dir)
+     , lifeConfigurationBranch      :: Branch
      } deriving (Show, Eq)
 
 makeFields ''LifeConfiguration
@@ -69,10 +78,11 @@ instance Semigroup LifeConfiguration where
     life1 <> life2 = LifeConfiguration
         { lifeConfigurationFiles       = life1^.files <> life2^.files
         , lifeConfigurationDirectories = life1^.directories <> life2^.directories
+        , lifeConfigurationBranch      = life2^.branch
         }
 
 instance Monoid LifeConfiguration where
-    mempty  = LifeConfiguration mempty mempty
+    mempty  = LifeConfiguration mempty mempty mempty
     mappend = (<>)
 
 singleFileConfig :: Path Rel File -> LifeConfiguration
@@ -91,6 +101,7 @@ lifeConfigMinus :: LifeConfiguration -- ^ repo .life config
 lifeConfigMinus dotfiles global = LifeConfiguration
     (Set.difference (dotfiles ^. files) (global ^. files))
     (Set.difference (dotfiles ^. directories) (global ^. directories))
+    (lifeConfigurationBranch dotfiles)
 
 ----------------------------------------------------------------------------
 -- Toml parser for life configuration
@@ -99,16 +110,18 @@ lifeConfigMinus dotfiles global = LifeConfiguration
 data CorpseConfiguration = CorpseConfiguration
     { corpseFiles       :: [FilePath]
     , corpseDirectories :: [FilePath]
+    , corpseBranch      :: Text
     }
 
 corpseConfiguationT :: BiToml CorpseConfiguration
 corpseConfiguationT = CorpseConfiguration
     <$> Toml.arrayOf _String "files"       .= corpseFiles
     <*> Toml.arrayOf _String "directories" .= corpseDirectories
+    <*> Toml.text            "branch"      .= corpseBranch
   where
     _String :: Prism AnyValue String
     _String = Prism
-        { preview = \(AnyValue t) -> Toml.matchText t >>= pure . toString
+        { preview = \(AnyValue t) -> toString <$> Toml.matchText t
         , review = AnyValue . Toml.Text . toText
         }
 
@@ -120,6 +133,7 @@ resurrect CorpseConfiguration{..} = do
     pure $ LifeConfiguration
         { lifeConfigurationFiles = Set.fromList filePaths
         , lifeConfigurationDirectories = Set.fromList dirPaths
+        , lifeConfigurationBranch = Branch corpseBranch
         }
 
 -- TODO: should tomland one day support this?...
@@ -131,6 +145,8 @@ renderLifeConfiguration printIfEmpty LifeConfiguration{..} = mconcat $
        maybeToList (render "directories" lifeConfigurationDirectories)
     ++ [ "\n" ]
     ++ maybeToList (render "files" lifeConfigurationFiles)
+    ++ [ "branch" <> " = \"" <> unBranch lifeConfigurationBranch <> "\""]
+    ++ [ "\n" ]
   where
     render :: Text -> Set (Path b t) -> Maybe Text
     render key paths = do

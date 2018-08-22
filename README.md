@@ -154,3 +154,7 @@ To pull everything except some files or some directories:
 ```
 $ life pull ChShersh --no-file some/file --no-dir some/dir
 ```
+
+### Branches management
+
+To select current branch just edit branch key in your `.life` file.

@@ -6,14 +6,14 @@ module Life.Main.Add
        ( lifeAdd
        ) where
 
-import Lens.Micro.Platform (Lens', (%~))
+import Lens.Micro.Platform (Lens', (%~), (^.))
 import Path (Abs, Dir, File, Path, Rel, parent, toFilePath, (</>))
 import Path.IO (copyDirRecur, copyFile, doesDirExist, doesFileExist, ensureDir, getHomeDir,
                 makeRelative, resolveDir, resolveFile)
 
-import Life.Configuration (LifeConfiguration, LifePath (..), directories, files, parseHomeLife,
-                           writeGlobalLife)
-import Life.Github (addToRepo, master, withSynced)
+import Life.Configuration (LifeConfiguration, Branch(..), BranchState(..), LifePath (..), branch,
+                           directories, files, parseHomeLife, writeGlobalLife)
+import Life.Github (addToRepo, withSynced, insideRepo, branchState)
 import Life.Main.Init (lifeInitQuestion)
 import Life.Message (abortCmd, errorMessage, infoMessage, warningMessage)
 import Life.Shell (LifeExistence (..), relativeToHome, repoName, whatIsLife)
@@ -25,7 +25,15 @@ import qualified Data.Set as Set
 lifeAdd :: LifePath -> IO ()
 lifeAdd lPath = whatIsLife >>= \case
     -- actual life add process
-    Both _ _ -> withSynced master addingProcess
+    Both _ _ -> do
+        life <- parseHomeLife
+        branchState (life^.branch) >>= \case
+            (NotExists,  branch') -> do
+                insideRepo $ "git" ["checkout", "-b", unBranch branch']
+                withSynced branch' addingProcess
+            (_, branch') -> do
+                insideRepo $ "git" ["checkout", unBranch branch']
+                withSynced branch' addingProcess
 
     -- if one of them is missing -- abort
     OnlyRepo _ -> abortCmd "add" ".life file doesn't exist"
@@ -89,7 +97,7 @@ checkEqualFiles path = do
 checkEqualDirs :: Path Rel Dir -> IO Bool
 checkEqualDirs _ = do
     warningMessage "TODO: check directories to be equal"
-    pure True
+    pure False
 
 -- | Just like 'copyFile' but also creates directory for second file.
 copyFileWithDir :: Path Abs File -> Path Abs File -> IO ()

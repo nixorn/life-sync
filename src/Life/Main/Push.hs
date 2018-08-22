@@ -10,9 +10,9 @@ import Lens.Micro.Platform ((^.))
 import Path (Abs, Path, Rel, toFilePath, (</>))
 import Path.IO (doesDirExist, doesFileExist, removeDirRecur, removeFile)
 
-import Life.Configuration (LifeConfiguration (..), directories, files, lifeConfigMinus,
-                           parseHomeLife, parseRepoLife)
-import Life.Github (master, updateDotfilesRepo, withSynced)
+import Life.Configuration (Branch(..), BranchState(..), LifeConfiguration (..), branch,
+                           directories, files, lifeConfigMinus, parseHomeLife, parseRepoLife)
+import Life.Github (branchState, updateDotfilesRepo, withSynced, setCurrentBranch)
 import Life.Main.Init (lifeInitQuestion)
 import Life.Message (abortCmd)
 import Life.Shell (LifeExistence (..), relativeToHome, repoName, whatIsLife)
@@ -22,11 +22,15 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 
 lifePush :: IO ()
-lifePush = whatIsLife >>= \case
-    OnlyRepo _ -> abortCmd "push" ".life file doesn't exist"
-    OnlyLife _ -> abortCmd "push" "dotfiles file doesn't exist"
-    NoLife     -> lifeInitQuestion "push" pushProcess
-    Both _ _   -> withSynced master pushProcess
+lifePush = do
+    life <- parseHomeLife
+    branchState (life^.branch) >>= \case
+        (OnlyRemote, _) -> error "Branch exists only on remote"
+        (branchS, branch') -> whatIsLife >>= \case
+            OnlyRepo _ -> abortCmd "push" ".life file doesn't exist"
+            OnlyLife _ -> abortCmd "push" "dotfiles file doesn't exist"
+            NoLife     -> lifeInitQuestion "push" pushProcess
+            Both _ _   -> setCurrentBranch branch' branchS >> withSynced branch' pushProcess
   where
     pushProcess :: IO ()
     pushProcess = do
@@ -55,6 +59,7 @@ lifePush = whatIsLife >>= \case
         pure $ LifeConfiguration
             <$> checkPaths eFiles
             <*> checkPaths eDirs
+            <*> (Success $ lf ^. branch :: Validation [Text] Branch)
       where
         withExist :: (Path Abs f -> IO Bool) -> Path Rel f -> IO (Path Rel f, Bool)
         withExist doesExist path = (path,) <$> (relativeToHome path >>= doesExist)

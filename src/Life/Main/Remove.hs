@@ -6,13 +6,13 @@ module Life.Main.Remove
        ( lifeRemove
        ) where
 
-import Lens.Micro.Platform (Lens', (%~))
+import Lens.Micro.Platform (Lens', (%~), (^.))
 import Path (Abs, Path, Rel)
 import Path.IO (getHomeDir, makeRelative, removeDirRecur, removeFile, resolveDir, resolveFile)
 
-import Life.Configuration (LifeConfiguration, LifePath (..), directories, files, parseHomeLife,
-                           writeGlobalLife)
-import Life.Github (master, removeFromRepo, withSynced)
+import Life.Configuration (LifeConfiguration, LifePath (..), branch, directories,
+                           files, parseHomeLife, writeGlobalLife)
+import Life.Github (removeFromRepo, withSynced)
 import Life.Message (abortCmd, warningMessage)
 import Life.Shell (LifeExistence (..), whatIsLife)
 
@@ -26,15 +26,17 @@ lifeRemove lPath = whatIsLife >>= \case
     OnlyLife _ -> abortCmd "remove" "dotfiles/ directory doesn't exist"
     OnlyRepo _ -> abortCmd "remove" ".life file doesn't exist"
     -- actual life remove process
-    Both _ _ -> withSynced master $ do
-        homeDirPath  <- getHomeDir
-        case lPath of
-            (File path) -> do
-                filePath <- resolveFile homeDirPath path >>= makeRelative homeDirPath
-                resolveConfiguration files removeFile filePath
-            (Dir path)  -> do
-                dirPath <- resolveDir homeDirPath path >>= makeRelative homeDirPath
-                resolveConfiguration directories removeDirRecur dirPath
+    Both _ _ -> do
+        life <- parseHomeLife
+        withSynced (life^.branch) $ do
+            homeDirPath  <- getHomeDir
+            case lPath of
+                (File path) -> do
+                    filePath <- resolveFile homeDirPath path >>= makeRelative homeDirPath
+                    resolveConfiguration files removeFile filePath
+                (Dir path)  -> do
+                    dirPath <- resolveDir homeDirPath path >>= makeRelative homeDirPath
+                    resolveConfiguration directories removeDirRecur dirPath
 
 resolveConfiguration :: Lens' LifeConfiguration (Set (Path Rel t))
                      -> (Path Abs t -> IO ()) -- ^ function to remove object

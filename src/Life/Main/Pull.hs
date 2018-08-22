@@ -6,18 +6,24 @@ module Life.Main.Pull
 
 import Path (Dir, File, Path, Rel)
 
-import Life.Configuration (LifeConfiguration (..))
-import Life.Github (Owner, cloneRepo, pullUpdateFromRepo, updateFromRepo)
+import Lens.Micro.Platform ((^.))
+import Life.Configuration (LifeConfiguration (..), BranchState(..), branch, parseHomeLife)
+import Life.Github (Owner, cloneRepo, pullUpdateFromRepo, master, updateFromRepo, setCurrentBranch, branchState)
 import Life.Main.Init (lifeInitQuestion)
 import Life.Message (abortCmd, choose, warningMessage)
 import Life.Shell (LifeExistence (..), whatIsLife)
 
 lifePull :: Owner -> Set (Path Rel File) -> Set (Path Rel Dir) -> IO ()
-lifePull owner withoutFiles withoutDirs = whatIsLife >>= \case
-    OnlyRepo _ -> warningMessage ".life file not found" >> pullUpdate
-    OnlyLife _ -> warningMessage "dotfiles not found" >> clone >> update
-    NoLife     -> initOrPull
-    Both _ _   -> pullUpdate
+lifePull owner withoutFiles withoutDirs = do
+    homeLife <- parseHomeLife
+    branchState (homeLife^.branch) >>= \case
+        (OnlyLocal, _) -> error "Branch from config not exists on remote"
+        (NotExists, _) -> error "Branch from config not exists locally and on remote"
+        (branchS, branch') -> whatIsLife >>= \case
+            OnlyRepo _ -> warningMessage ".life file not found" >> setCurrentBranch branch' branchS >> pullUpdate
+            OnlyLife _ -> warningMessage "dotfiles not found" >> clone >> setCurrentBranch branch' branchS >> update
+            NoLife     -> initOrPull >> setCurrentBranch branch' branchS
+            Both _ _   -> setCurrentBranch branch' branchS >> pullUpdate
   where
     initOrPull :: IO ()
     initOrPull = do
@@ -31,9 +37,9 @@ lifePull owner withoutFiles withoutDirs = whatIsLife >>= \case
             _   -> error "Impossible choice"
 
     life :: LifeConfiguration
-    life = LifeConfiguration withoutFiles withoutDirs
+    life = LifeConfiguration withoutFiles withoutDirs master
 
     clone, update, pullUpdate :: IO ()
     clone = cloneRepo owner
-    update = updateFromRepo life
+    update     = updateFromRepo life
     pullUpdate = pullUpdateFromRepo life
