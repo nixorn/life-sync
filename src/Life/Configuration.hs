@@ -8,13 +8,12 @@
 -- | Contains configuration data type.
 
 module Life.Configuration
-       ( Branch(..)
-       , BranchState(..)
-       , LifePath (..)
-       , LifeConfiguration  (..)
+       ( LifeConfiguration  (..)
+
+       , getBranch
+       , getBranchName
        , singleDirConfig
        , singleFileConfig
-
        , lifeConfigMinus
 
 --         -- * Parsing exceptions
@@ -42,21 +41,14 @@ import Path (Dir, File, Path, Rel, fromAbsFile, parseRelDir, parseRelFile, toFil
 import Toml (AnyValue (..), BiToml, Prism (..), (.=))
 
 import Life.Shell (lifePath, relativeToHome, repoName)
+import Life.Core (Branch (..))
 
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import qualified Relude.Unsafe as Unsafe
 import qualified Text.Show as Show
 import qualified Toml
 
--- Git branch representation.
-newtype Branch = Branch { unBranch :: Text } deriving (Show, Eq, Semigroup, Monoid)
-
--- | Data type to represent where particular branch exists.
-data BranchState = OnlyRemote | OnlyLocal | ExistsBoth | NotExists
-
--- | Data type to represent either file or directory.
-data LifePath = File FilePath | Dir FilePath
-    deriving (Show)
 
 ----------------------------------------------------------------------------
 -- Life Configuration data type with lenses
@@ -65,10 +57,16 @@ data LifePath = File FilePath | Dir FilePath
 data LifeConfiguration = LifeConfiguration
      { lifeConfigurationFiles       :: Set (Path Rel File)
      , lifeConfigurationDirectories :: Set (Path Rel Dir)
-     , lifeConfigurationBranch      :: Branch
+     , lifeConfigurationBranch      :: Last Branch
      } deriving (Show, Eq)
 
 makeFields ''LifeConfiguration
+
+getBranch :: LifeConfiguration -> Branch
+getBranch  = Unsafe.fromJust . getLast . lifeConfigurationBranch
+
+getBranchName :: LifeConfiguration -> Text
+getBranchName = unBranch . getBranch
 
 ----------------------------------------------------------------------------
 -- Algebraic instances and utilities
@@ -133,7 +131,7 @@ resurrect CorpseConfiguration{..} = do
     pure $ LifeConfiguration
         { lifeConfigurationFiles = Set.fromList filePaths
         , lifeConfigurationDirectories = Set.fromList dirPaths
-        , lifeConfigurationBranch = Branch corpseBranch
+        , lifeConfigurationBranch = Last $ Just $ Branch corpseBranch
         }
 
 -- TODO: should tomland one day support this?...
@@ -141,12 +139,10 @@ resurrect CorpseConfiguration{..} = do
 renderLifeConfiguration :: Bool  -- ^ True to see empty entries in output
                         -> LifeConfiguration
                         -> Text
-renderLifeConfiguration printIfEmpty LifeConfiguration{..} = mconcat $
-       maybeToList (render "directories" lifeConfigurationDirectories)
-    ++ [ "\n" ]
-    ++ maybeToList (render "files" lifeConfigurationFiles)
-    ++ [ "branch" <> " = \"" <> unBranch lifeConfigurationBranch <> "\""]
-    ++ [ "\n" ]
+renderLifeConfiguration printIfEmpty life@LifeConfiguration{..} = T.intercalate "\n"
+       [ "branch = \"" <> getBranchName life <> "\""
+       , mconcat $ maybeToList (render "directories" lifeConfigurationDirectories)
+       , mconcat $ maybeToList (render "files" lifeConfigurationFiles)]
   where
     render :: Text -> Set (Path b t) -> Maybe Text
     render key paths = do

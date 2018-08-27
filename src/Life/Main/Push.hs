@@ -10,9 +10,10 @@ import Lens.Micro.Platform ((^.))
 import Path (Abs, Path, Rel, toFilePath, (</>))
 import Path.IO (doesDirExist, doesFileExist, removeDirRecur, removeFile)
 
-import Life.Configuration (Branch(..), BranchState(..), LifeConfiguration (..), branch,
+import Life.Core (Branch (..))
+import Life.Configuration (LifeConfiguration (..), branch, getBranch,
                            directories, files, lifeConfigMinus, parseHomeLife, parseRepoLife)
-import Life.Github (branchState, updateDotfilesRepo, withSynced, setCurrentBranch)
+import Life.Github (updateDotfilesRepo, withSynced, setCurrentBranch)
 import Life.Main.Init (lifeInitQuestion)
 import Life.Message (abortCmd)
 import Life.Shell (LifeExistence (..), relativeToHome, repoName, whatIsLife)
@@ -24,13 +25,11 @@ import qualified Data.Text as Text
 lifePush :: IO ()
 lifePush = do
     life <- parseHomeLife
-    branchState (life^.branch) >>= \case
-        (OnlyRemote, _) -> error "Branch exists only on remote"
-        (branchS, branch') -> whatIsLife >>= \case
+    whatIsLife >>= \case
             OnlyRepo _ -> abortCmd "push" ".life file doesn't exist"
             OnlyLife _ -> abortCmd "push" "dotfiles file doesn't exist"
             NoLife     -> lifeInitQuestion "push" pushProcess
-            Both _ _   -> setCurrentBranch branch' branchS >> withSynced branch' pushProcess
+            Both _ _   -> setCurrentBranch (getBranch life) >> withSynced (getBranch life) pushProcess
   where
     pushProcess :: IO ()
     pushProcess = do
@@ -59,7 +58,7 @@ lifePush = do
         pure $ LifeConfiguration
             <$> checkPaths eFiles
             <*> checkPaths eDirs
-            <*> (Success $ lf ^. branch :: Validation [Text] Branch)
+            <*> (Success $ lf ^. branch :: Validation [Text] (Last Branch))
       where
         withExist :: (Path Abs f -> IO Bool) -> Path Rel f -> IO (Path Rel f, Bool)
         withExist doesExist path = (path,) <$> (relativeToHome path >>= doesExist)

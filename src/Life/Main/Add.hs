@@ -6,14 +6,15 @@ module Life.Main.Add
        ( lifeAdd
        ) where
 
-import Lens.Micro.Platform (Lens', (%~), (^.))
+import Lens.Micro.Platform (Lens', (%~))
 import Path (Abs, Dir, File, Path, Rel, parent, toFilePath, (</>))
 import Path.IO (copyDirRecur, copyFile, doesDirExist, doesFileExist, ensureDir, getHomeDir,
                 makeRelative, resolveDir, resolveFile)
 
-import Life.Configuration (LifeConfiguration, Branch(..), BranchState(..), LifePath (..), branch,
-                           directories, files, parseHomeLife, writeGlobalLife)
-import Life.Github (addToRepo, withSynced, insideRepo, branchState)
+import Life.Core (LifePath (..))
+import Life.Configuration (LifeConfiguration, directories, files,
+                           getBranch, getBranchName, parseHomeLife, writeGlobalLife)
+import Life.Github (addToRepo, withSynced, insideRepo)
 import Life.Main.Init (lifeInitQuestion)
 import Life.Message (abortCmd, errorMessage, infoMessage, warningMessage)
 import Life.Shell (LifeExistence (..), relativeToHome, repoName, whatIsLife)
@@ -27,18 +28,11 @@ lifeAdd lPath = whatIsLife >>= \case
     -- actual life add process
     Both _ _ -> do
         life <- parseHomeLife
-        branchState (life^.branch) >>= \case
-            (NotExists,  branch') -> do
-                insideRepo $ "git" ["checkout", "-b", unBranch branch']
-                withSynced branch' addingProcess
-            (_, branch') -> do
-                insideRepo $ "git" ["checkout", unBranch branch']
-                withSynced branch' addingProcess
-
-    -- if one of them is missing -- abort
+        insideRepo $ "git" ["checkout", getBranchName life]
+        withSynced (getBranch life) addingProcess
+        -- if one of them is missing -- abort
     OnlyRepo _ -> abortCmd "add" ".life file doesn't exist"
     OnlyLife _ -> abortCmd "add" "dotfiles/ directory doesn't exist"
-
     -- if both .life and dotfiles doesn't exist go to init process
     NoLife -> lifeInitQuestion "add" addingProcess
   where

@@ -10,10 +10,10 @@ module Life.Main.Init
 import Path (mkRelFile)
 import Path.IO (doesDirExist, doesFileExist)
 
+import Life.Core (CopyDirection (..), Owner (..), Repo (Repo))
 import Life.Configuration (LifeConfiguration (..), parseHomeLife, renderLifeConfiguration,
                            singleFileConfig, writeGlobalLife)
-import Life.Github (CopyDirection (..), Owner (..), Repo (Repo), copyLife, createRepository,
-                    insideRepo, master)
+import Life.Github (copyLife, createRepository, insideRepo, master)
 import Life.Message (abortCmd, chooseYesNo, infoMessage, promptNonEmpty, skipMessage,
                      successMessage, warningMessage)
 import Life.Shell (LifeExistence (..), createDirInHome, lifePath, relativeToHome, repoName,
@@ -33,7 +33,7 @@ predefinedLifeConfig = mempty
           , $(mkRelFile ".ghc/ghci.conf")
           , $(mkRelFile ".stylish-haskell.yaml")
           ]
-     , lifeConfigurationBranch = master
+     , lifeConfigurationBranch = Last (Just master)
     }
 
 lifeInit :: Owner -> IO ()

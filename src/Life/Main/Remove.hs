@@ -6,11 +6,12 @@ module Life.Main.Remove
        ( lifeRemove
        ) where
 
-import Lens.Micro.Platform (Lens', (%~), (^.))
+import Lens.Micro.Platform (Lens', (%~))
 import Path (Abs, Path, Rel)
 import Path.IO (getHomeDir, makeRelative, removeDirRecur, removeFile, resolveDir, resolveFile)
 
-import Life.Configuration (LifeConfiguration, LifePath (..), branch, directories,
+import Life.Core (LifePath (..))
+import Life.Configuration (LifeConfiguration, directories, getBranch,
                            files, parseHomeLife, writeGlobalLife)
 import Life.Github (removeFromRepo, withSynced)
 import Life.Message (abortCmd, warningMessage)
@@ -28,7 +29,7 @@ lifeRemove lPath = whatIsLife >>= \case
     -- actual life remove process
     Both _ _ -> do
         life <- parseHomeLife
-        withSynced (life^.branch) $ do
+        withSynced (getBranch life) $ do
             homeDirPath  <- getHomeDir
             case lPath of
                 (File path) -> do

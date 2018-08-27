@@ -6,9 +6,8 @@ module Life.Main.Pull
 
 import Path (Dir, File, Path, Rel)
 
-import Lens.Micro.Platform ((^.))
-import Life.Configuration (LifeConfiguration (..), BranchState(..), branch, parseHomeLife)
-import Life.Github (Owner, cloneRepo, pullUpdateFromRepo, master, updateFromRepo, setCurrentBranch, branchState)
+import Life.Configuration (LifeConfiguration (..), getBranch, parseHomeLife)
+import Life.Github (Owner, cloneRepo, pullUpdateFromRepo, master, updateFromRepo, setCurrentBranch)
 import Life.Main.Init (lifeInitQuestion)
 import Life.Message (abortCmd, choose, warningMessage)
 import Life.Shell (LifeExistence (..), whatIsLife)
@@ -16,14 +15,12 @@ import Life.Shell (LifeExistence (..), whatIsLife)
 lifePull :: Owner -> Set (Path Rel File) -> Set (Path Rel Dir) -> IO ()
 lifePull owner withoutFiles withoutDirs = do
     homeLife <- parseHomeLife
-    branchState (homeLife^.branch) >>= \case
-        (OnlyLocal, _) -> error "Branch from config not exists on remote"
-        (NotExists, _) -> error "Branch from config not exists locally and on remote"
-        (branchS, branch') -> whatIsLife >>= \case
-            OnlyRepo _ -> warningMessage ".life file not found" >> setCurrentBranch branch' branchS >> pullUpdate
-            OnlyLife _ -> warningMessage "dotfiles not found" >> clone >> setCurrentBranch branch' branchS >> update
-            NoLife     -> initOrPull >> setCurrentBranch branch' branchS
-            Both _ _   -> setCurrentBranch branch' branchS >> pullUpdate
+    let branch = getBranch homeLife
+    whatIsLife >>= \case
+            OnlyRepo _ -> warningMessage ".life file not found" >> setCurrentBranch branch >> pullUpdate
+            OnlyLife _ -> warningMessage "dotfiles not found" >> clone >> setCurrentBranch branch >> update
+            NoLife     -> initOrPull >> setCurrentBranch branch
+            Both _ _   -> setCurrentBranch branch >> pullUpdate
   where
     initOrPull :: IO ()
     initOrPull = do
@@ -37,7 +34,7 @@ lifePull owner withoutFiles withoutDirs = do
             _   -> error "Impossible choice"
 
     life :: LifeConfiguration
-    life = LifeConfiguration withoutFiles withoutDirs master
+    life = LifeConfiguration withoutFiles withoutDirs (Last $ Just master)
 
     clone, update, pullUpdate :: IO ()
     clone = cloneRepo owner

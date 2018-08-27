@@ -11,7 +11,6 @@ module Life.Github
        , withSynced
 
          -- * Repository manipulation commands
-       , CopyDirection (..)
        , copyLife
        , addToRepo
        , createRepository
@@ -19,7 +18,6 @@ module Life.Github
        , removeFromRepo
        , updateDotfilesRepo
        , updateFromRepo
-       , branchState
 
          -- * Constants
        , master
@@ -31,37 +29,32 @@ import Path (Abs, Dir, File, Path, Rel, toFilePath, (</>))
 import Path.IO (copyDirRecur, copyFile, getHomeDir, withCurrentDir)
 import System.IO.Error (IOError, isDoesNotExistError)
 
-import Lens.Micro.Platform ((^.))
-import Life.Configuration (Branch(..), BranchState(..), LifeConfiguration (..), branch, lifeConfigMinus, parseRepoLife, parseHomeLife)
+import Life.Core (Owner(..), Repo(..), Branch (..), CopyDirection (..), CommitMsg (..))
+import Life.Configuration (LifeConfiguration (..), getBranch, lifeConfigMinus, parseRepoLife, parseHomeLife)
 import Life.Message (chooseYesNo, errorMessage, infoMessage, warningMessage)
 import Life.Shell (lifePath, relativeToHome, repoName, ($|))
-
-import qualified Data.Text as T
-
-newtype Owner = Owner { unOwner  :: Text } deriving (Show)
-newtype Repo  = Repo  { unRepo   :: Text } deriving (Show)
 
 ----------------------------------------------------------------------------
 -- VSC commands
 ----------------------------------------------------------------------------
 
-askToPushka :: Branch -> Text -> IO ()
-askToPushka branch'@(Branch branchname) commitMsg = do
-    "git" ["checkout", branchname]
+askToPushka :: Branch -> CommitMsg -> IO ()
+askToPushka branch@(Branch branchName) commitMsg = do
+    "git" ["checkout", branchName]
     "git" ["add", "."]
     infoMessage "The following changes are going to be pushed:"
     "git" ["diff", "--name-status", "HEAD"]
     continue <- chooseYesNo "Would you like to proceed?"
     if continue
-    then pushka branch' commitMsg
+    then pushka commitMsg branch
     else errorMessage "Abort pushing" >> exitFailure
 
 -- | Make a commit and push it.
-pushka :: Branch -> Text -> IO ()
-pushka (Branch branch') commitMsg = do
+pushka :: CommitMsg -> Branch -> IO ()
+pushka (CommitMsg commitMsg) (Branch branch) = do
     "git" ["add", "."]
     "git" ["commit", "-m", commitMsg]
-    "git" ["push", "-u", "origin", branch']
+    "git" ["push", "-u", "origin", branch]
 
 -- | Creates repository on GitHub inside given folder.
 createRepository :: Owner -> Repo -> IO ()
@@ -69,7 +62,7 @@ createRepository (Owner owner) (Repo repo) = do
     let description = ":computer: Configuration files"
     "git" ["init"]
     "hub" ["create", "-d", description, owner <> "/" <> repo]
-    pushka master "Create the project"
+    pushka "Create the project" master
 
 ----------------------------------------------------------------------------
 -- dotfiles workflow
@@ -82,10 +75,8 @@ insideRepo action = do
     withCurrentDir repoPath action
 
 -- | Commits all changes inside 'repoName' and pushes to remote.
-pushRepo :: Text -> IO ()
-pushRepo commitMsg = do
-    life <- parseHomeLife
-    insideRepo $ askToPushka (life^.branch) commitMsg
+pushRepo :: CommitMsg -> Branch -> IO ()
+pushRepo commitMsg branch = insideRepo $ askToPushka branch commitMsg
 
 -- | Clones @dotfiles@ repository assuming it doesn't exist.
 cloneRepo :: Owner -> IO ()
@@ -96,51 +87,38 @@ cloneRepo (Owner owner) = do
         "git" ["clone", "git@github.com:" <> owner <> "/dotfiles.git"]
 
 -- | Returns true if local @dotfiles@ repository is synchronized with remote repo.
-checkRemoteSync :: Branch -> IO (Bool, BranchState)
-checkRemoteSync branch'@(Branch branchName) = do
-    (branchS, _) <- branchState branch'
-    case branchS of
-        OnlyLocal  -> pure (False, OnlyLocal)
-        OnlyRemote -> pure (False, OnlyLocal)
-        branchS' -> do
-            localHash  <- "git" $| ["rev-parse", branchName]
-            remoteHash <- "git" $| ["rev-parse", "origin/" <> branchName]
-            pure (localHash == remoteHash, branchS')
+checkRemoteSync :: Branch -> IO Bool
+checkRemoteSync (Branch branchName) = do
+    "git" ["fetch", "origin"]
+    localHash  <- "git" $| ["rev-parse", branchName]
+    remoteHash <- "git" $| ["rev-parse", "origin/" <> branchName]
+    pure $ localHash == remoteHash
 
 withSynced :: Branch -> IO a -> IO a
-withSynced branch'@(Branch branchname) action = insideRepo $ do
+withSynced branch@(Branch branchName) action = insideRepo $ do
     infoMessage "Checking if repo is synchnorized..."
-    (isSyсnced, branchS) <- checkRemoteSync branch'
+    isSyсnced <- checkRemoteSync branch
     if isSyсnced then do
         infoMessage "Repo is up-to-date"
         action
         else do
             warningMessage "Local version of repository is out of date"
             shouldSync <- chooseYesNo "Do you want to sync repo with remote?"
-            if shouldSync then case branchS of
-                OnlyLocal -> do
-                    setCurrentBranch branch' branchS
-                    "git" ["push", "--set-upstream", "origin", branchname]
-                    action
-                NotExists -> errorMessage "Should never happen" >> exitFailure
-                _ -> do
-                    "git" ["rebase", "origin/" <> branchname]
-                    setCurrentBranch branch' branchS
-                    action
+            if shouldSync then do
+                setCurrentBranch branch
+                "git" ["rebase", "origin/" <> branchName]
+                action
               else do
                 errorMessage "Aborting current command because repository is not synchronized with remote"
                 exitFailure
 
 -- | Try to set branch in @dotfiles@
-setCurrentBranch :: Branch -> BranchState -> IO ()
-setCurrentBranch branch' NotExists = insideRepo $ "git" ["checkout", "-b", unBranch branch']
-setCurrentBranch branch' _         = insideRepo $ "git" ["checkout", unBranch branch']
+setCurrentBranch :: Branch  -> IO ()
+setCurrentBranch (Branch branchName) = insideRepo $ "git" ["checkout", "-b", branchName]
 
 ----------------------------------------------------------------------------
 -- File manipulation
 ----------------------------------------------------------------------------
-
-data CopyDirection = FromHomeToRepo | FromRepoToHome
 
 pullUpdateFromRepo :: LifeConfiguration -> IO ()
 pullUpdateFromRepo life = do
@@ -156,10 +134,10 @@ updateFromRepo excludeLife = insideRepo $ do
 
     copyLife FromRepoToHome lifeToLive
 
-updateDotfilesRepo :: Text -> LifeConfiguration -> IO ()
+updateDotfilesRepo :: CommitMsg -> LifeConfiguration -> IO ()
 updateDotfilesRepo commitMsg life = do
     copyLife FromHomeToRepo life
-    pushRepo commitMsg
+    pushRepo commitMsg (getBranch life)
 
 copyLife :: CopyDirection -> LifeConfiguration -> IO ()
 copyLife direction LifeConfiguration{..} = do
@@ -195,6 +173,8 @@ copyPathList copyAction direction pathList = do
 -- | Adds file or directory to the repository and commits
 addToRepo :: (Path Abs t -> Path Abs t -> IO ()) -> Path Rel t -> IO ()
 addToRepo copyFun path = do
+    life <- parseHomeLife
+
     -- copy file
     sourcePath <- relativeToHome path
     destinationPath <- relativeToHome (repoName </> path)
@@ -205,12 +185,13 @@ addToRepo copyFun path = do
     repoLifeFile <- relativeToHome (repoName </> lifePath)
     copyFile lifeFile repoLifeFile
 
-    let commitMsg = "Add: " <> toText (toFilePath path)
-    pushRepo commitMsg
+    let commitMsg = CommitMsg $ "Add: " <> toText (toFilePath path)
+    pushRepo commitMsg (getBranch life)
 
 -- | Removes file or directory from the repository and commits
 removeFromRepo :: (Path Abs t -> IO ()) -> Path Rel t -> IO ()
 removeFromRepo removeFun path = do
+    life <- parseHomeLife
     absPath <- relativeToHome (repoName </> path)
     catch (removeFun absPath) handleNotExist
 
@@ -219,8 +200,8 @@ removeFromRepo removeFun path = do
     repoLifeFile <- relativeToHome (repoName </> lifePath)
     copyFile lifeFile repoLifeFile
 
-    let commitMsg = "Remove: " <> pathTextName
-    pushRepo commitMsg
+    let commitMsg = CommitMsg $ "Remove: " <> pathTextName
+    pushRepo commitMsg (getBranch life)
   where
     pathTextName :: Text
     pathTextName = toText $ toFilePath path
@@ -233,24 +214,3 @@ removeFromRepo removeFun path = do
 -- | Git "master" branch constant.
 master :: Branch
 master = Branch "master"
-
-branchState :: Branch -> IO (BranchState, Branch)
-branchState branch' = do
-    insideRepo $ "git" ["fetch", "origin"]
-    remoteBranches <- insideRepo $ "git" $| ["branch", "-r", "--format=%(refname)"]
-    localBranches  <- insideRepo $ "git" $| ["branch", "--format=%(refname)"]
-    let existsRemote  = elem branchName $ parseGitOutput $ T.pack remoteBranches
-        existsLocally = elem branchName $ parseGitOutput $ T.pack localBranches
-    pure (branchStateSolver existsLocally existsRemote, branch')
-    where
-      formatBranchName bn = viaNonEmpty last (T.splitOn "/" bn)
-      branchName = unBranch branch'
-      parseGitOutput   = fmap (fromMaybe "" . formatBranchName) . T.lines
-
-      branchStateSolver :: Bool -- exists locally
-                        -> Bool -- exists on remote
-                        -> BranchState
-      branchStateSolver True  True  = ExistsBoth
-      branchStateSolver True  False = OnlyLocal
-      branchStateSolver False True  = OnlyRemote
-      branchStateSolver False False = NotExists
